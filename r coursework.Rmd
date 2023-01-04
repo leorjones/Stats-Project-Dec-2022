@@ -1,0 +1,169 @@
+---
+title: "R_Coursework_2022"
+author: "Leo Jones"
+date: "2022-12-08"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table,glue)
+library(heplots)
+library(stringi)
+library(stringr)
+setwd("C:/Users/Leo Jones/Downloads")
+```
+
+Q1. Reading the data into R:
+```{r q1}
+dat <- read.table("prob.txt")
+```
+
+
+Q2. Formatting table:
+```{r q2}
+dat <- paste(dat,collapse =' ')
+dat <- gsub("[[:punct:]]", "", gsub("-"," ",dat)) #removing punctuation
+dat<- data.frame(strsplit(dat, "[[:space:]]")) #splitting into words
+colnames(dat)<- ("Words")
+head(dat)
+```
+
+
+Q3. Creating a letter count:
+```{r q3}
+dat$Count <- nchar(dat$Words)
+hist(dat$Count, xlab='Word Length', main='Frequency of lengths of words')
+```
+
+Q4. New column for word length:
+```{r q4}
+dat$State <- ifelse(dat$Count<4, '0', '1')
+```
+
+Q5. Summing over this column:
+```{r q5}
+paste(sum(strtoi(dat$State)), ' long words out of ', nrow(dat), '\n', nrow(dat)- sum(strtoi(dat$State)), ' short words out of ', nrow(dat))
+```
+
+Q6. Counting pairs:
+```{r q6}
+dat$Pair <- mapply(dat$State, shift(dat$State, 1, 2, 'lead'), FUN = function(a,b){paste(a,b)} ) #this adds a column shifted by one value and then compares the two columns
+n11 <- nrow(subset(dat, dat$Pair=='1 1')) 
+n10 <- nrow(subset(dat, dat$Pair=='1 0')) 
+n01 <- nrow(subset(dat, dat$Pair=='0 1')) 
+n00 <- nrow(subset(dat, dat$Pair=='0 0')) 
+```
+
+Q7. Estimating proportions based on the values obtained in (5):
+```{r q7}
+paste('The expected proportion of 11 is', signif((122/193)^2,4),'\n The expected proportion of 10 is ', signif(122*71/193^2, 4),'\n The expected proportion of 01 is ', signif(122*71/193^2,4),'\n The expected proportion of 00 is ', signif((71/193)^2,4))
+
+```
+
+Q8. Log likelihood statistic: \n
+To avoid overflow errors, I calculated the likelihoods already under logarithms. Due to this we can ignore any constant term (from likelihood being directly proportional to the sum of p/q's) as it will cancel out when you subtract the q statistic from the p statistic. I've defined the log likelihood for p and q as functions as this will be useful later.
+```{r q8}
+loglq <- function(a,b,c,d){
+  return( ((2*a)+b+c)*log(122) + ((2*d)+b+c)*log(71) - 384*log(193))
+}
+#likeq <- 132*log(122) + 111*log(122*71) + 30*log(71) - 384*log(193)
+loglp <- function(a,b,c,d){
+  return(a*log(a) + b*log(b) + c*log(c) + d*log(d) - 192*log(192))
+}
+likepq <- loglp(n11,n10,n01,n00) - loglq(n11,n10,n01,n00)
+
+```
+
+Q9. Log likelihood for random permutations: \n
+I created a function that generates random permutations and returns the log likelihood statistic. I then displayed this using a density plot.
+```{r q9}
+randperm <- function(){
+  perm <- sample(dat$State, size=193, replace=FALSE) #smaple function randomizes permutation
+  pairs <- paste(perm , shift(perm, 1, 2, 'lead')) #shifting and concatenating
+  a=sum(pairs=='1 1')
+  b=sum(pairs=='1 0')
+  c=sum(pairs=='0 1')
+  d=sum(pairs=='0 0')
+  return(loglp(a,b,c,d)-loglq(a,b,c,d)) #returning log likelihood statistic 
+  
+}
+
+s=replicate(10000,(randperm()))
+plot(density(c(s)), main='Density of Log Likelihoods', xlab= 'Log likelihood statistic') #replicate runs this function 10000 times
+paste('Mean: ',round(mean(s),4),'\n Standard deviation: ',round(sd(s),4))
+```
+\n
+We get graph highly concentrated around one value, with a mean of ~0.5 and sd ~ 0.7. Most of our values lie  between 0 and 1 with all of them positive.
+
+
+Q10. QQ-plot with twice our log likelihoods to a chi- squared distribution \n We have one degree of freedom as we have two free parameters estimated under the alternative hypothesis and three under the null hypothesis.
+```{r q10}
+qqPlot(c(s)*2, distribution ='chisq', df=1, ylab='Sample Quantities', xlab='Theoretical Quantities', main='Chi-squared QQ plot')
+#plotting qqplot with chi-squared 1 degree of freedom
+
+```
+
+Q11. Comparing this to our first log likelihood:
+```{r q11}
+paste(quantile(c(replicate(10000,(randperm())))*2, probs=(0.95))) #95th percentile of the doubled log likelihood
+
+paste(qchisq(0.95,1)) #95th percentile of the chi-squared distribution for comparison
+```
+We need to consider half of this value ~1.9 as we doubled our log likelihood. At 5% significance, 1.9<6.0 (from Q8) and we therefore reject the null hypothesis.
+
+Q12. Creating the matrix of transition probabilities using proportions in (6):
+```{r q12}
+tmatrix <- matrix(c(15/71,56/71,55/121,66/121), nrow=2) #these are eaily figured out from a diagram
+print(tmatrix)
+```
+
+Q13. Function that simulates a draw of length m:
+```{r q13}
+sim <- function(m,x_0){
+  c <- list()
+  if(m>1){
+    x_1=ifelse(x_0==0, ifelse(sample(1:71,1)>15,1,0), ifelse(sample(1:121,1)>55,0,1))
+    #using nested ifs to calculate x_n+1 from x_n
+    c=sim(m-1,x_1)} #generating the draw recursively 
+  return(append(c,x_0,after=0))
+}
+
+paste(sim(10,0)) #a random draw of length 10, starting at 0
+```
+
+Q14. Simulating n=100 realizations and using these to estimate the transition probabilities:
+```{r q14}
+real <- function(m,x_0){
+  return(lapply(str_count(stri_join_list(sim(m,x_0),collapse = ''),paste0("(?=",c("00","01","10","11"),")")), FUN= function(a){round(a/(m-1),4)}))
+#this function runs the simulation once and returns the estimated transition probabilities, to 4sf
+}
+
+estimates <- data.frame(t(replicate(100,real(100,0)))) #storing the results of 100 estimations into a data frame 
+head(estimates)
+
+X1=sum(as.numeric(estimates$X1))/100
+X2=sum(as.numeric(estimates$X2))/100
+X3=sum(as.numeric(estimates$X3))/100
+X4=sum(as.numeric(estimates$X4))/100 #I know I can do this more efficiently using apply but it wasn't working :(
+paste(X1,',',X2,',',X3,',',X4/100) #means of the columns
+
+#the pairwise correlations are as follows
+paste(cor(as.numeric(estimates$X1),as.numeric(estimates$X2)))
+paste(cor(as.numeric(estimates$X1),as.numeric(estimates$X3)))
+paste(cor(as.numeric(estimates$X1),as.numeric(estimates$X4)))
+paste(cor(as.numeric(estimates$X2),as.numeric(estimates$X3)))
+paste(cor(as.numeric(estimates$X4),as.numeric(estimates$X2)))
+paste(cor(as.numeric(estimates$X3),as.numeric(estimates$X4)))
+
+```
+The means for my random realizations are similar to that of the transition matrix, implying that the estimators are unbiased.
+
+
+Q15.
+```{r q15}
+
+```
